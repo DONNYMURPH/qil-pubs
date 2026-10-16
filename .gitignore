@@ -12,5 +12,3 @@ deploy/cronjob.yaml
 
 # Institution-specific notes and findings.
 NOTES-local.md
-
-.DS_Store

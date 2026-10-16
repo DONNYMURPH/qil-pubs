@@ -171,3 +171,32 @@ def test_corrupt_state_does_not_crash_the_run(tmp_path):
 ])
 def test_protocol_token_strips_local_tracking_numbers(protocol, expected):
     assert _protocol_token(protocol) == expected
+
+
+def test_workbook_saves_without_a_system_temp_dir(tmp_path, monkeypatch):
+    """Reproduces the read-only-rootfs failure: no usable /tmp.
+
+    openpyxl only needs a temp file at save() time, so this used to blow up
+    after every API call had already been made.
+    """
+    import tempfile
+
+    from qil_pubs.pubmed import Publication
+    from qil_pubs.report import State, write_workbook
+    from qil_pubs.trials import Trial
+
+    missing = tmp_path / "definitely-not-here"
+    monkeypatch.setattr(tempfile, "tempdir", str(missing))
+    monkeypatch.setenv("TMPDIR", str(missing))
+
+    out = tmp_path / "out" / "qil_publications.xlsx"
+    out.parent.mkdir(parents=True)
+    trial = Trial(nct="NCT02432235", name="Study A", row=2)
+    pub = Publication(pmid="1", title="T", ncts={"NCT02432235"}, evidence={"databank"})
+
+    write_workbook(out, [pub], {"NCT02432235": trial}, [trial],
+                   State(path=tmp_path / "state.json"), {"1"}, "2026-10-16")
+
+    assert out.exists() and out.stat().st_size > 0
+    # The fallback lands beside the output, which is the one writable path.
+    assert (out.parent / ".tmp").is_dir()

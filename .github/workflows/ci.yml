@@ -18,7 +18,10 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e '.[dev]'
+        # pyyaml is only needed by the manifest check below, not by the package.
+        run: |
+          pip install -e '.[dev]'
+          pip install pyyaml
 
       - name: Test
         # The suite mocks every HTTP call, so it must pass without network
@@ -26,18 +29,40 @@ jobs:
         run: pytest -q
 
       - name: Check the CronJob manifest parses
+        # Checks the committed template. The real deploy/cronjob.yaml is
+        # gitignored (it carries the mail relay and recipients), so it is not
+        # here to check.
         run: |
           python3 - <<'PY'
-          import sys, yaml
-          docs = [d for d in yaml.safe_load_all(open("deploy/cronjob.yaml")) if d]
+          import yaml
+          path = "deploy/cronjob.example.yaml"
+          docs = [d for d in yaml.safe_load_all(open(path)) if d]
           kinds = [d["kind"] for d in docs]
           assert kinds == ["PersistentVolumeClaim", "Secret", "CronJob"], kinds
+
           cj = next(d for d in docs if d["kind"] == "CronJob")
           spec = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]
           args = spec["containers"][0]["args"]
-          # The weekly schedule is only correct in combination with the gate;
+
+          # The weekly schedule is only correct in combination with the gate:
           # losing the flag would run this every Monday instead of monthly.
           assert cj["spec"]["schedule"] == "15 6 * * 1", cj["spec"]["schedule"]
           assert "--only-first-week" in args, args
-          print("manifest ok:", kinds)
+
+          # A read-only root filesystem needs a writable /tmp, or openpyxl
+          # cannot save the workbook. This bit us on the first cluster run.
+          if spec["containers"][0]["securityContext"]["readOnlyRootFilesystem"]:
+              mounts = {m["mountPath"] for m in spec["containers"][0]["volumeMounts"]}
+              assert "/tmp" in mounts, f"readOnlyRootFilesystem with no /tmp mount: {mounts}"
+              tmp_vol = next(v for v in spec["volumes"] if v["name"] == "tmp")
+              assert "emptyDir" in tmp_vol, tmp_vol
+
+          # The template must not ship anyone's real relay or recipients.
+          secret = next(d for d in docs if d["kind"] == "Secret")
+          assert secret["stringData"]["SMTP_HOST"] == "", "template has a real SMTP host"
+          env = {e["name"]: e["value"] for e in spec["containers"][0]["env"]}
+          assert env["QIL_EMAIL_TO"] == "", "template has a real recipient"
+          assert "OWNER" in spec["containers"][0]["image"], "template has a real image"
+
+          print(f"{path} ok: {kinds}, schedule {cj['spec']['schedule']}")
           PY
