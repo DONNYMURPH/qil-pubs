@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e '.[dev]'
+
+      - name: Test
+        # The suite mocks every HTTP call, so it must pass without network
+        # access to NCBI — that is the point of it.
+        run: pytest -q
+
+      - name: Check the CronJob manifest parses
+        run: |
+          python3 - <<'PY'
+          import sys, yaml
+          docs = [d for d in yaml.safe_load_all(open("deploy/cronjob.yaml")) if d]
+          kinds = [d["kind"] for d in docs]
+          assert kinds == ["PersistentVolumeClaim", "Secret", "CronJob"], kinds
+          cj = next(d for d in docs if d["kind"] == "CronJob")
+          spec = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+          args = spec["containers"][0]["args"]
+          # The weekly schedule is only correct in combination with the gate;
+          # losing the flag would run this every Monday instead of monthly.
+          assert cj["spec"]["schedule"] == "15 6 * * 1", cj["spec"]["schedule"]
+          assert "--only-first-week" in args, args
+          print("manifest ok:", kinds)
+          PY

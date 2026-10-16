@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+# Output and institutional data stay out of a public repo.
+out/
+data/*.xlsx
+*.csv
+
+# Local deploy manifest: carries the real relay host and recipients.
+deploy/cronjob.yaml
+
+# Institution-specific notes and findings.
+NOTES-local.md

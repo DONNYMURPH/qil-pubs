@@ -1,0 +1,115 @@
+# Template. Copy to cronjob.yaml, fill in the image, the mail relay and
+# the recipients, and keep that copy out of git — cronjob.yaml is
+# gitignored for exactly that reason.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qil-pubs-data
+  namespace: qil-pubs
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment and set to your cluster's class if it has no default.
+  # storageClassName: longhorn
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qil-pubs-secrets
+  namespace: qil-pubs
+type: Opaque
+stringData:
+  # Optional. An NCBI API key raises the rate limit from 3 to 10 req/sec.
+  # https://account.ncbi.nlm.nih.gov/settings/
+  NCBI_API_KEY: ""
+  # Your institution's mail relay. Set SMTP_STARTTLS to "0" if the relay does
+  # not advertise STARTTLS on the port you use, "1" otherwise.
+  SMTP_HOST: ""
+  SMTP_PORT: "25"
+  SMTP_STARTTLS: "1"
+  SMTP_FROM: "qil-pubs@example.org"
+  SMTP_USER: ""
+  SMTP_PASSWORD: ""
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: qil-pubs
+  namespace: qil-pubs
+spec:
+  # Every Monday at 06:15; the container exits immediately unless the date is
+  # in the first 7 days, which together means "first Monday of the month".
+  # Cron cannot express that alone: when day-of-month and day-of-week are both
+  # restricted it ORs them, so "15 6 1-7 * 1" would fire on every Monday AND
+  # every 1st-7th. The --only-first-week flag is the gate.
+  # Minute is off the hour deliberately: NCBI is busiest at :00.
+  schedule: "15 6 * * 1"
+  # Requires Kubernetes 1.27+. Drop this line on older clusters and the
+  # schedule is interpreted as UTC instead.
+  timeZone: "America/Chicago"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # A full pass is a few minutes; this is a generous ceiling that still
+      # stops a wedged pod from holding the PVC until next month.
+      activeDeadlineSeconds: 5400
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: qil-pubs
+              # Replace OWNER with your GitHub user or org, and pin a real tag.
+              image: ghcr.io/OWNER/qil-pubs:0.1.0
+              imagePullPolicy: IfNotPresent
+              args:
+                - run
+                - --trials=/config/trials.xlsx
+                - --out-dir=/data
+                - --state=/data/state.json
+                - --only-first-week
+              env:
+                - name: NCBI_EMAIL
+                  value: "" # NCBI asks API users for a contact address
+                - name: QIL_EMAIL_TO
+                  value: "" # comma-separated recipients for the monthly summary
+              envFrom:
+                - secretRef:
+                    name: qil-pubs-secrets
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: trials
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: qil-pubs-data
+            - name: trials
+              configMap:
+                name: qil-pubs-trials

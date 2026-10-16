@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+out
+data
+tests
+diagnose_*.py
+**/__pycache__
+*.egg-info
+.pytest_cache
