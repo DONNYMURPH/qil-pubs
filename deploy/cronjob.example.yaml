@@ -72,7 +72,7 @@ spec:
           containers:
             - name: qil-pubs
               # Replace OWNER with your GitHub user or org, and pin a real tag.
-              image: ghcr.io/OWNER/qil-pubs:0.1.0
+              image: ghcr.io/OWNER/qil-pubs:0.1.1
               imagePullPolicy: IfNotPresent
               args:
                 - run
@@ -91,6 +91,8 @@ spec:
               volumeMounts:
                 - name: data
                   mountPath: /data
+                - name: tmp
+                  mountPath: /tmp
                 - name: trials
                   mountPath: /config
                   readOnly: true
@@ -107,6 +109,12 @@ spec:
                 capabilities:
                   drop: ["ALL"]
           volumes:
+            - name: tmp
+              # openpyxl writes each worksheet to a NamedTemporaryFile before
+              # assembling the xlsx, so a read-only root filesystem needs a
+              # writable /tmp or wb.save() raises FileNotFoundError.
+              emptyDir:
+                sizeLimit: 256Mi
             - name: data
               persistentVolumeClaim:
                 claimName: qil-pubs-data

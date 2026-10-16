@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qil-pubs"
-version = "0.1.0"
+version = "0.1.1"
 description = "Track publications citing QIL-supported clinical trials by NCT number"
 requires-python = ">=3.11"
 dependencies = [

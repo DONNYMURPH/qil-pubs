@@ -49,6 +49,14 @@ jobs:
           assert cj["spec"]["schedule"] == "15 6 * * 1", cj["spec"]["schedule"]
           assert "--only-first-week" in args, args
 
+          # A read-only root filesystem needs a writable /tmp, or openpyxl
+          # cannot save the workbook. This bit us on the first cluster run.
+          if spec["containers"][0]["securityContext"]["readOnlyRootFilesystem"]:
+              mounts = {m["mountPath"] for m in spec["containers"][0]["volumeMounts"]}
+              assert "/tmp" in mounts, f"readOnlyRootFilesystem with no /tmp mount: {mounts}"
+              tmp_vol = next(v for v in spec["volumes"] if v["name"] == "tmp")
+              assert "emptyDir" in tmp_vol, tmp_vol
+
           # The template must not ship anyone's real relay or recipients.
           secret = next(d for d in docs if d["kind"] == "Secret")
           assert secret["stringData"]["SMTP_HOST"] == "", "template has a real SMTP host"

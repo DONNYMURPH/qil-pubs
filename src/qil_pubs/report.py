@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -139,6 +140,33 @@ def _style_header(ws, widths: list[tuple[str, int]]) -> None:
     ws.freeze_panes = "A2"
 
 
+def ensure_writable_tempdir(fallback: Path) -> None:
+    """Make sure a temp directory exists before openpyxl needs one.
+
+    openpyxl writes every worksheet to a NamedTemporaryFile and only assembles
+    the xlsx at save time. Under a container with
+    ``readOnlyRootFilesystem: true`` and no /tmp mount, that raises
+    FileNotFoundError after all the API work is already done — the most
+    expensive possible moment to fail. Rather than rely on the deployment
+    getting a /tmp volume right, fall back to a directory beside the output.
+    """
+    import tempfile
+
+    try:
+        with tempfile.NamedTemporaryFile(prefix="qil-pubs-probe-"):
+            return
+    except (OSError, FileNotFoundError) as exc:
+        target = Path(fallback) / ".tmp"
+        target.mkdir(parents=True, exist_ok=True)
+        os.environ["TMPDIR"] = str(target)
+        # tempfile caches its directory on first use, so setting the
+        # environment variable alone is not enough.
+        tempfile.tempdir = str(target)
+        log.warning(
+            "no usable system temp directory (%s) — using %s instead", exc, target
+        )
+
+
 def write_workbook(
     path: str | Path,
     pubs: list[Publication],
@@ -148,6 +176,7 @@ def write_workbook(
     new_pmids: set[str],
     run_date: str,
 ) -> None:
+    ensure_writable_tempdir(Path(path).parent)
     wb = Workbook()
 
     ws = wb.active
